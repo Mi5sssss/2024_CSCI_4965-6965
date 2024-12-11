@@ -6,14 +6,15 @@ import torch
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
-from datetime import date, timedelta
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import mean_squared_error, accuracy_score
 from sklearn.svm import SVC
 from sklearn.linear_model import RidgeClassifier
+from sklearn.metrics import mean_squared_error, accuracy_score
 import warnings
+from datetime import date, timedelta
+
 
 warnings.filterwarnings('ignore')
 sns.set_theme()
@@ -28,12 +29,6 @@ full_train.drop('Unnamed: 0', axis=1, inplace=True)
 # Convert ordinal integers to date objects
 full_train['date'] = full_train['date'].apply(lambda x: date.fromordinal(int(x)) if not pd.isnull(x) else x)
 full_train['img_date'] = full_train['img_date'].apply(lambda x: date.fromordinal(int(x)) if not pd.isnull(x) else x)
-
-# # Import hab_functions and process important info
-# import hab_functions
-
-# # Ensure timedelta operations in hab_functions work with datetime.date
-# hab_functions.get_important_info(full_train)
 
 # Load test data
 full_test_df = pd.read_csv('./Data/clean_test_data.csv')
@@ -140,30 +135,30 @@ def predict_logistic_regression(model, X_data_t):
     return preds_original
 
 ###############################
-# Additional Models with GPU Support
+# Sklearn-Compatible Models
 ###############################
-def train_random_forest(X_train, y_train):
-    model = RandomForestClassifier(random_state=42, n_estimators=100, n_jobs=-1)
+def train_random_forest(X_train, y_train, n_estimators=200):
+    model = RandomForestClassifier(n_estimators=n_estimators, random_state=42)
     model.fit(X_train, y_train)
     return model
 
-def train_knn(X_train, y_train, n_neighbors=5):
-    model = KNeighborsClassifier(n_neighbors=n_neighbors, n_jobs=-1)
+def train_knn(X_train, y_train, n_neighbors=10):
+    model = KNeighborsClassifier(n_neighbors=n_neighbors)
     model.fit(X_train, y_train)
     return model
 
-def train_mlp(X_train, y_train):
-    model = MLPClassifier(random_state=42, hidden_layer_sizes=(64, 64), max_iter=500)
+def train_mlp(X_train, y_train, hidden_layer_sizes=(128, 64), max_iter=1000):
+    model = MLPClassifier(hidden_layer_sizes=hidden_layer_sizes, max_iter=max_iter, random_state=42)
     model.fit(X_train, y_train)
     return model
 
-def train_svm(X_train, y_train):
-    model = SVC(random_state=42, kernel='rbf', probability=True)
+def train_svm(X_train, y_train, kernel='poly'):
+    model = SVC(kernel=kernel, probability=True, random_state=42)
     model.fit(X_train, y_train)
     return model
 
-def train_ridge(X_train, y_train):
-    model = RidgeClassifier(random_state=42)
+def train_ridge(X_train, y_train, alpha=0.5):
+    model = RidgeClassifier(alpha=alpha, random_state=42)
     model.fit(X_train, y_train)
     return model
 
@@ -187,12 +182,12 @@ X_val_t = torch.tensor(X_val_numeric.values, dtype=torch.float32).to(device)
 y_val_t = torch.tensor(y_val_bin.values, dtype=torch.float32).to(device)
 
 models = {
-    "Logistic Regression": lambda X_train, y_train: train_logistic_regression(X_train_t, y_train_t, X_train_t.shape[1], epochs=10),
-    "Random Forest": train_random_forest,
-    "KNN": train_knn,
-    "MLP": train_mlp,
-    "SVM": train_svm,
-    "Ridge": train_ridge
+    "Logistic Regression": lambda X_train, y_train: train_logistic_regression(X_train_t, y_train_t, X_train_t.shape[1], epochs=15, lr=0.005, batch_size=128),
+    "Random Forest": lambda X_train, y_train: train_random_forest(X_train, y_train, n_estimators=200),
+    "KNN": lambda X_train, y_train: train_knn(X_train, y_train, n_neighbors=10),
+    "MLP": lambda X_train, y_train: train_mlp(X_train, y_train, hidden_layer_sizes=(128, 64), max_iter=1000),
+    "SVM": lambda X_train, y_train: train_svm(X_train, y_train, kernel='poly'),
+    "Ridge": lambda X_train, y_train: train_ridge(X_train, y_train, alpha=0.5)
 }
 scores = {}
 hyperparameters = {}
@@ -203,32 +198,32 @@ for model_name, train_func in models.items():
         model = train_func(X_train_numeric, y_train_bin)
         rmse, acc = evaluate_model(model, X_val_numeric, y_val_bin, is_pytorch=True)
         scores[model_name] = {"RMSE": rmse, "Accuracy": acc}
-        hyperparameters[model_name] = {"epochs": 10, "lr": 0.01, "batch_size": 64}
+        hyperparameters[model_name] = {"epochs": 15, "lr": 0.005, "batch_size": 128}
     elif model_name == "KNN":
-        model = train_func(X_train_numeric, y_train, n_neighbors=5)
+        model = train_func(X_train_numeric, y_train)
         rmse, acc = evaluate_model(model, X_val_numeric, y_val)
         scores[model_name] = {"RMSE": rmse, "Accuracy": acc}
-        hyperparameters[model_name] = {"n_neighbors": 5}
+        hyperparameters[model_name] = {"n_neighbors": 10}
     elif model_name == "MLP":
         model = train_func(X_train_numeric, y_train)
         rmse, acc = evaluate_model(model, X_val_numeric, y_val)
         scores[model_name] = {"RMSE": rmse, "Accuracy": acc}
-        hyperparameters[model_name] = {"hidden_layer_sizes": (64, 64), "max_iter": 500}
+        hyperparameters[model_name] = {"hidden_layer_sizes": (128, 64), "max_iter": 1000}
     elif model_name == "SVM":
         model = train_func(X_train_numeric, y_train)
         rmse, acc = evaluate_model(model, X_val_numeric, y_val)
         scores[model_name] = {"RMSE": rmse, "Accuracy": acc}
-        hyperparameters[model_name] = {"kernel": 'rbf', "probability": True}
+        hyperparameters[model_name] = {"kernel": 'poly'}
     elif model_name == "Ridge":
         model = train_func(X_train_numeric, y_train)
         rmse, acc = evaluate_model(model, X_val_numeric, y_val)
         scores[model_name] = {"RMSE": rmse, "Accuracy": acc}
-        hyperparameters[model_name] = {"solver": "auto"}
+        hyperparameters[model_name] = {"alpha": 0.5}
     elif model_name == "Random Forest":
         model = train_func(X_train_numeric, y_train)
         rmse, acc = evaluate_model(model, X_val_numeric, y_val)
         scores[model_name] = {"RMSE": rmse, "Accuracy": acc}
-        hyperparameters[model_name] = {"n_estimators": 100, "n_jobs": -1}
+        hyperparameters[model_name] = {"n_estimators": 200}
 
 # Display Results
 print("\nModel Performance:")
